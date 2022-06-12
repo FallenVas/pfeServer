@@ -6,7 +6,7 @@ const axios = require("axios").default;
 const chartDataModel = require("./models/chartData");
 const uri = process.env.MONGODB_URI;
 const cron = require("node-cron");
-
+const TableDataModel = require("./models/tableData");
 mongoose
   .connect(uri)
   .then(() => {
@@ -18,12 +18,56 @@ mongoose
   });
 
 cron.schedule("0 0 */24 * * *", () => {
-    getChartDataDaily();
+  getChartDataDaily();
+});
+cron.schedule("0 0 */1 * * *", () => {
+  getTableData();
+});
+app.get("/getTableData", async (req, res) => {
+  const data = await TableDataModel.findOne();
+  res.json(data);
 });
 app.get("/getDataChart", async (req, res) => {
   const data = await chartDataModel.findOne();
   res.json(data.chartData);
 });
+const getTableData = async () => {
+  const response = await axios.get(
+    `https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?CMC_PRO_API_KEY=${process.env.CMC_PRIVATE_KEY}`
+  );
+  let data = response.data;
+  data = data.data;
+  const filteredResponse = [];
+  let idString = "";
+  for (let i = 0; i < data.length; i++) {
+    const element = data[i];
+    if (element.cmc_rank < 11) {
+      idString += element.id + ",";
+      filteredResponse.push(element);
+    }
+  }
+  idString = idString.slice(0, -1);
+  const response2 = await axios.get(
+    `https://pro-api.coinmarketcap.com/v2/cryptocurrency/info?CMC_PRO_API_KEY=${process.env.CMC_PRIVATE_KEY}&id=${idString}`
+  );
+  let data2 = response2.data;
+  const idArray = idString.split(",");
+  for (let i = 0; i < idArray.length; i++) {
+    const element = data2.data[idArray[i]];
+    for (let j = 0; j < filteredResponse.length; j++) {
+      if (element.id == filteredResponse[j].id) {
+        filteredResponse[j].image = element.logo;
+      }
+    }
+  }
+  const newTable = new TableDataModel({ tableData: filteredResponse });
+  try {
+    await TableDataModel.deleteMany({});
+    await newTable.save();
+  } catch (error) {
+    console.log(error.message);
+  }
+};
 const getChartDataDaily = async () => {
   const coins = [
     "BTC",
